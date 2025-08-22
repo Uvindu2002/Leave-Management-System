@@ -24,3 +24,23 @@ export const protect = (req, res, next) => {
     res.status(401).json({ message: 'Token invalid or expired' });
   }
 };
+
+// Optional: Admin-only middleware
+export const requireAdmin = (req, res, next) => {
+  protect(req, res, () => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    next();
+  });
+};
+
+// Optional: Manager-or-admin middleware
+export const requireManagerOrAdmin = (req, res, next) => {
+  protect(req, res, () => {
+    if (req.user.role !== 'manager' && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Manager or admin access required' });
+    }
+    next();
+  });
+};

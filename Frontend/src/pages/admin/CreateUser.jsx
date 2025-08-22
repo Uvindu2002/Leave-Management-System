@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useRole } from "../../contexts/RoleContext";
 
 export default function CreateUser() {
   const [formData, setFormData] = useState({
@@ -6,45 +7,60 @@ export default function CreateUser() {
     email: "",
     employee_id: "",
     password: "",
-    role: "employee", // default role
-    manager_id: "",   // 🆕 added manager field
+    role: "employee",
+    manager_id: "",
+    employment_type: "confirmed",
+    confirmation_date: "",
   });
 
   const [message, setMessage] = useState("");
-  const [managers, setManagers] = useState([]); // 🆕 state for managers list
-  const [loading, setLoading] = useState(true); // 🆕 loading state
+  const [managers, setManagers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const { user: currentUser, token } = useRole(); // ✅ Get token from context
 
-  // 🆕 fetch managers list
+  // Fetch managers list (only admins and managers)
   useEffect(() => {
     const fetchManagers = async () => {
+      if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "manager")) {
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const res = await fetch("/api/users/managers"); // ✅ Correct endpoint
+        const res = await fetch("/api/users/managers", {
+          headers: {
+            Authorization: `Bearer ${token}`, // ✅ Add authorization header
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        console.log('Managers fetch response status:', res.status);
+        
         const data = await res.json();
         if (res.ok) {
           setManagers(data);
+          console.log('Managers loaded successfully:', data.length);
         } else {
-          console.error("Failed to fetch managers:", data.message);
-          setMessage("Failed to load managers list");
+          setMessage("Failed to load managers list: " + (data.message || 'Unknown error'));
+          console.error('Managers fetch failed:', data);
         }
       } catch (error) {
-        console.error("Error fetching managers:", error);
-        setMessage("Error loading managers list");
+        setMessage("Error loading managers list: " + error.message);
+        console.error('Managers fetch error:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchManagers();
-  }, []);
+    
+    if (currentUser && token) {
+      fetchManagers();
+    }
+  }, [currentUser, token]); // ✅ Add token to dependency array
 
   const handleChange = (e) => {
-    let { name, value } = e.target;
-
-    // ensure manager_id is a number (or empty)
-    if (name === "manager_id" && value !== "") {
-      value = Number(value);
-    }
-
+    const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -53,12 +69,15 @@ export default function CreateUser() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
+    setMessage("");
 
     try {
       const res = await fetch("/api/users/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`, // ✅ Use token from context
         },
         body: JSON.stringify(formData),
       });
@@ -66,119 +85,220 @@ export default function CreateUser() {
       const data = await res.json();
 
       if (res.ok) {
-        setMessage(`✅ User (${formData.role}) created successfully: ${data.user?.name || ""}`);
+        setMessage(`✅ User (${formData.role}) created successfully!`);
         setFormData({
           name: "",
           email: "",
           employee_id: "",
           password: "",
           role: "employee",
-          manager_id: "", // reset manager
+          manager_id: "",
+          employment_type: "confirmed",
+          confirmation_date: "",
         });
+        
+        // Refresh managers list after creating a new user
+        const managersRes = await fetch("/api/users/managers", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (managersRes.ok) {
+          const managersData = await managersRes.json();
+          setManagers(managersData);
+        }
       } else {
         setMessage(`❌ Error: ${data.message || "Something went wrong"}`);
       }
     } catch (error) {
-      console.error(error);
-      setMessage("❌ Server error");
+      setMessage("❌ Server error: " + error.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  // Only allow admins to create users
+  if (!currentUser || currentUser.role !== "admin") {
+    return (
+      <div style={{ padding: "20px", textAlign: "center" }}>
+        <h2>Access Denied</h2>
+        <p>Only administrators can create new users.</p>
+      </div>
+    );
+  }
+
+  // Show loading while checking authentication
+  if (!currentUser || !token) {
+    return (
+      <div style={{ padding: "20px", textAlign: "center" }}>
+        <h2>Loading...</h2>
+        <p>Please wait while we verify your authentication.</p>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: "20px", maxWidth: "500px", margin: "0 auto" }}>
+    <div style={{ padding: "20px", maxWidth: "600px", margin: "0 auto" }}>
       <h2>Create New User</h2>
 
+      {message && (
+        <div style={{
+          marginBottom: "15px",
+          padding: "10px",
+          backgroundColor: message.includes("✅") ? "#d4edda" : "#f8d7da",
+          border: `1px solid ${message.includes("✅") ? "#c3e6cb" : "#f5c6cb"}`,
+          borderRadius: "4px",
+          color: message.includes("✅") ? "#155724" : "#721c24"
+        }}>
+          {message}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
-        {/* Name */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Name:</label>
-          <input
-            type="text"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            required
-          />
+        {/* Basic Information */}
+        <div style={{ marginBottom: "15px", padding: "15px", border: "1px solid #ddd", borderRadius: "5px" }}>
+          <h3 style={{ marginTop: 0 }}>Basic Information</h3>
+          
+          <div style={{ marginBottom: "10px" }}>
+            <label>Name:</label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              required
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Email:</label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Employee ID:</label>
+            <input
+              type="text"
+              name="employee_id"
+              value={formData.employee_id}
+              onChange={handleChange}
+              required
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Password:</label>
+            <input
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              minLength="6"
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
         </div>
 
-        {/* Email */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Email:</label>
-          <input
-            type="email"
-            name="email"
-            value={formData.email}
-            onChange={handleChange}
-            required
-          />
+        {/* Role and Employment Details */}
+        <div style={{ marginBottom: "15px", padding: "15px", border: "1px solid #ddd", borderRadius: "5px" }}>
+          <h3>Role & Employment</h3>
+          
+          <div style={{ marginBottom: "10px" }}>
+            <label>Role:</label>
+            <select 
+              name="role" 
+              value={formData.role} 
+              onChange={handleChange}
+              style={{ width: "100%", padding: "8px" }}
+            >
+              <option value="employee">Employee</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Employment Type:</label>
+            <select 
+              name="employment_type" 
+              value={formData.employment_type} 
+              onChange={handleChange}
+              style={{ width: "100%", padding: "8px" }}
+            >
+              <option value="probation">Probation</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="contract">Contract</option>
+              <option value="internship">Internship</option>
+            </select>
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Confirmation Date:</label>
+            <input
+              type="date"
+              name="confirmation_date"
+              value={formData.confirmation_date}
+              onChange={handleChange}
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: "10px" }}>
+            <label>Manager:</label>
+            <select
+              name="manager_id"
+              value={formData.manager_id}
+              onChange={handleChange}
+              style={{ width: "100%", padding: "8px" }}
+              disabled={loading}
+            >
+              <option value="">-- Select Manager --</option>
+              {loading ? (
+                <option value="" disabled>Loading managers...</option>
+              ) : (
+                managers.map((mgr) => (
+                  <option key={mgr.id} value={mgr.id}>
+                    {mgr.name} ({mgr.employee_id})
+                  </option>
+                ))
+              )}
+            </select>
+            <small style={{ display: "block", color: "#666", marginTop: "5px" }}>
+              {formData.role === "admin" 
+                ? "Admins can have managers for reporting purposes" 
+                : formData.role === "manager" 
+                ? "Managers can also report to other managers" 
+                : "Select the manager for this employee"}
+            </small>
+          </div>
         </div>
 
-        {/* Employee ID */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Employee ID:</label>
-          <input
-            type="text"
-            name="employee_id"
-            value={formData.employee_id}
-            onChange={handleChange}
-            required
-          />
-        </div>
-
-        {/* Password */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Password:</label>
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            required
-          />
-        </div>
-
-        {/* Role */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Role:</label>
-          <select name="role" value={formData.role} onChange={handleChange}>
-            <option value="employee">Employee</option>
-            <option value="manager">Manager</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-
-        {/* 🆕 Manager dropdown (show for all roles) */}
-        <div style={{ marginBottom: "10px" }}>
-          <label>Manager:</label>
-          <select
-            name="manager_id"
-            value={formData.manager_id}
-            onChange={handleChange}
-          >
-            <option value="">-- Select Manager --</option>
-            {loading ? (
-              <option value="" disabled>Loading managers...</option>
-            ) : (
-              managers.map((mgr) => (
-                <option key={mgr.id} value={mgr.id}>
-                  {mgr.name} ({mgr.employee_id})
-                </option>
-              ))
-            )}
-          </select>
-          <small style={{ display: "block", color: "#666", marginTop: "5px" }}>
-            {formData.role === "admin" 
-              ? "Admins can have managers for reporting purposes" 
-              : formData.role === "manager" 
-              ? "Managers can also report to other managers" 
-              : "Select the manager for this employee"}
-          </small>
-        </div>
-
-        <button type="submit">Create User</button>
+        <button 
+          type="submit" 
+          disabled={submitting || loading}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: (submitting || loading) ? "#ccc" : "#007bff",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: (submitting || loading) ? "not-allowed" : "pointer"
+          }}
+        >
+          {submitting ? "Creating..." : loading ? "Loading..." : "Create User"}
+        </button>
       </form>
-
-      {message && <p style={{ marginTop: "15px" }}>{message}</p>}
     </div>
   );
 }

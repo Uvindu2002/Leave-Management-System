@@ -15,36 +15,54 @@ export function RoleProvider({ children }) {
 
     const storedUser = JSON.parse(localStorage.getItem("user"));
     const storedToken = localStorage.getItem("token");
-    const storedActiveRole = localStorage.getItem("activeRole"); // 🆕 Get stored activeRole
+    const storedActiveRole = localStorage.getItem("activeRole");
+
+    console.log('Loading user roles from storage:', {
+      hasStoredUser: !!storedUser,
+      hasStoredToken: !!storedToken,
+      storedActiveRole
+    });
 
     if (storedUser && storedToken) {
       try {
         // Validate token by fetching latest user info
         const res = await fetch("/api/users/me", {
-          headers: { Authorization: `Bearer ${storedToken}` },
+          headers: { 
+            Authorization: `Bearer ${storedToken}`,
+            'Content-Type': 'application/json'
+          },
         });
 
-        if (!res.ok) throw new Error("Token invalid or expired");
+        console.log('Token validation response status:', res.status);
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            throw new Error("Token invalid or expired");
+          }
+          throw new Error(`Server error: ${res.status}`);
+        }
 
         const data = await res.json();
+        console.log('User data from /me endpoint:', data);
 
+        // Use stored activeRole if available, otherwise use role from backend
+        const newActiveRole = storedActiveRole || data.activeRole || data.role || "employee";
+        
         setUser(data);
         setToken(storedToken);
         setOriginalRole(data.role || "employee");
-        
-        // 🆕 Use stored activeRole if available, otherwise use role from backend
-        const newActiveRole = storedActiveRole || data.activeRole || data.role || "employee";
         setActiveRole(newActiveRole);
 
-        // 🆕 Update localStorage with activeRole
+        // Update localStorage
         localStorage.setItem("user", JSON.stringify(data));
         localStorage.setItem("activeRole", newActiveRole);
 
       } catch (err) {
-        console.log("Token invalid, logging out", err);
+        console.log("Token validation failed, logging out", err);
         logout();
       }
     } else {
+      console.log('No stored user or token, resetting roles');
       resetRoles();
     }
 
@@ -55,7 +73,11 @@ export function RoleProvider({ children }) {
   useEffect(() => {
     loadUserRoles();
 
-    const handleStorageChange = () => loadUserRoles();
+    const handleStorageChange = () => {
+      console.log('Storage changed, reloading user roles');
+      loadUserRoles();
+    };
+    
     window.addEventListener("storage", handleStorageChange);
 
     return () => window.removeEventListener("storage", handleStorageChange);
@@ -63,9 +85,11 @@ export function RoleProvider({ children }) {
 
   // Login function: save user + token
   const login = (newUser, newToken) => {
+    console.log('Logging in user:', newUser.id);
+    
     localStorage.setItem("user", JSON.stringify(newUser));
     localStorage.setItem("token", newToken);
-    localStorage.setItem("activeRole", newUser.activeRole || newUser.role || "employee"); // 🆕 Store activeRole
+    localStorage.setItem("activeRole", newUser.activeRole || newUser.role || "employee");
 
     setUser(newUser);
     setToken(newToken);
@@ -75,9 +99,11 @@ export function RoleProvider({ children }) {
 
   // Logout: clear everything
   const logout = () => {
+    console.log('Logging out user');
+    
     localStorage.removeItem("user");
     localStorage.removeItem("token");
-    localStorage.removeItem("activeRole"); // 🆕 Remove activeRole
+    localStorage.removeItem("activeRole");
     resetRoles();
   };
 
@@ -98,72 +124,61 @@ export function RoleProvider({ children }) {
   };
 
   const switchRole = async (newRole) => {
-  if (!canSwitchToRole(newRole)) {
-    console.log("Role switch not allowed by frontend validation");
-    return false;
-  }
-
-  try {
-    console.log("Attempting to switch role to:", newRole);
-    console.log("Current token:", token ? "exists" : "missing");
-
-    const res = await fetch("/api/users/switch-role", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ targetRole: newRole }),
-    });
-
-    console.log("Switch role response status:", res.status);
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.log("Switch role failed:", res.status, errorData);
-      throw new Error(errorData.message || `HTTP error! status: ${res.status}`);
+    console.log('Attempting to switch role to:', newRole);
+    
+    if (!canSwitchToRole(newRole)) {
+      console.log('Role switch not allowed by frontend validation');
+      return false;
     }
 
-    const data = await res.json();
-    console.log("Switch role successful:", data);
+    try {
+      const res = await fetch("/api/users/switch-role", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ targetRole: newRole }),
+      });
 
-    // Update localStorage and state with new activeRole and token
-    const updatedUser = { 
-      ...user, 
-      activeRole: newRole,
-      // Ensure all required user fields are maintained
-      id: user.id,
-      employee_id: user.employee_id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      manager_id: user.manager_id
-    };
-    
-    localStorage.setItem("user", JSON.stringify(updatedUser));
-    localStorage.setItem("token", data.token);
-    localStorage.setItem("activeRole", newRole);
+      console.log('Role switch response status:', res.status);
 
-    setActiveRole(newRole);
-    setUser(updatedUser);
-    setToken(data.token);
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Role switch successful:', data);
 
-    return true;
-  } catch (err) {
-    console.log("Role switch failed:", err.message);
-    
-    // Fallback: update frontend state only if backend call fails
-    // This allows role switching to work even if backend has issues
-    const updatedUser = { ...user, activeRole: newRole };
-    localStorage.setItem("user", JSON.stringify(updatedUser));
-    localStorage.setItem("activeRole", newRole);
-    
-    setActiveRole(newRole);
-    setUser(updatedUser);
-    
-    return true; // Still return true for UX purposes
-  }
-};
+        // Update state and localStorage
+        const updatedUser = { ...user, activeRole: newRole };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("activeRole", newRole);
+
+        setActiveRole(newRole);
+        setUser(updatedUser);
+        setToken(data.token);
+
+        return true;
+      } else {
+        console.log('Role switch failed with status:', res.status);
+        // Fallback to frontend-only update
+        const updatedUser = { ...user, activeRole: newRole };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        localStorage.setItem("activeRole", newRole);
+        setActiveRole(newRole);
+        setUser(updatedUser);
+        return true;
+      }
+    } catch (err) {
+      console.log("Role switch failed, using frontend fallback:", err);
+      // Frontend-only fallback
+      const updatedUser = { ...user, activeRole: newRole };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      localStorage.setItem("activeRole", newRole);
+      setActiveRole(newRole);
+      setUser(updatedUser);
+      return true;
+    }
+  };
 
   return (
     <RoleContext.Provider
