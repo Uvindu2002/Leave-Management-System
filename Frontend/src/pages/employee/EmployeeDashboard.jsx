@@ -16,7 +16,6 @@ export default function EmployeeDashboard() {
 
   return (
     <div>
-      <Header user={user} />
       <div className="p-6">
         <h2 className="text-2xl font-bold">Employee Dashboard</h2>
         <div className="mt-4 grid gap-4">

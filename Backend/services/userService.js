@@ -189,6 +189,16 @@ export const canSwitchToRole = (originalRole, targetRole) => {
   return false;
 };
 
+// Add this function for role switching validation
+export const validateRoleSwitch = (currentUser, targetRole) => {
+  console.log('Validating role switch:', { currentUser: currentUser.role, targetRole });
+  
+  if (!canSwitchToRole(currentUser.role, targetRole)) {
+    throw new Error('Role switch not allowed');
+  }
+  return targetRole;
+};
+
 export const getAllUsers = async () => {
   console.log('Fetching all users');
   
@@ -204,4 +214,250 @@ export const getAllUsers = async () => {
 
   console.log('Total users found:', users.length);
   return users;
+};
+
+// Add this function to get user details with leave information
+export const getUserDetails = async (userId) => {
+  console.log('Fetching user details for ID:', userId);
+  
+  try {
+    // Get user basic info
+    const [user] = await sql`
+      SELECT u.*, ed.employment_type, ed.confirmation_date, m.name as manager_name
+      FROM users u
+      LEFT JOIN employee_details ed ON u.id = ed.user_id
+      LEFT JOIN users m ON u.manager_id = m.id
+      WHERE u.id = ${userId}
+    `;
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Get leave entitlements
+    const currentYear = new Date().getFullYear();
+    const [leaveEntitlements] = await sql`
+      SELECT * FROM leave_entitlements 
+      WHERE user_id = ${userId} AND year = ${currentYear}
+    `;
+
+    // Get recent leaves (last 10)
+    const recentLeaves = await sql`
+      SELECT * FROM leaves 
+      WHERE user_id = ${userId} 
+      ORDER BY created_at DESC 
+      LIMIT 10
+    `;
+
+    // Get leave statistics
+    const [leaveStats] = await sql`
+      SELECT COUNT(*) as total_leaves, SUM(total_days) as total_days
+      FROM leaves 
+      WHERE user_id = ${userId} AND status = 'approved'
+    `;
+
+    return {
+      user,
+      leave_entitlements: leaveEntitlements || {},
+      recent_leaves: recentLeaves || [],
+      leave_stats: leaveStats || { total_leaves: 0, total_days: 0 }
+    };
+  } catch (error) {
+    console.error('Error fetching user details:', error);
+    throw error;
+  }
+};
+
+// Add this function to update user
+export const updateUser = async (userId, updateData) => {
+  console.log('Updating user ID:', userId);
+  
+  try {
+    const { name, email, role, employment_type, manager_id } = updateData;
+
+    // Check if email already exists (excluding current user)
+    const [existingEmail] = await sql`
+      SELECT id FROM users WHERE email = ${email} AND id != ${userId}
+    `;
+    if (existingEmail) {
+      throw new Error('Email already exists');
+    }
+
+    const [updatedUser] = await sql`
+      UPDATE users 
+      SET name = ${name}, email = ${email}, role = ${role}, manager_id = ${manager_id || null}
+      WHERE id = ${userId}
+      RETURNING *
+    `;
+
+    // Update employee details if provided
+    if (employment_type) {
+      await sql`
+        UPDATE employee_details 
+        SET employment_type = ${employment_type}
+        WHERE user_id = ${userId}
+      `;
+    }
+
+    return updatedUser;
+  } catch (error) {
+    console.error('Error updating user:', error);
+    throw error;
+  }
+};
+
+// Add this function to delete user
+export const deleteUser = async (userId) => {
+  console.log('Deleting user ID:', userId);
+  
+  try {
+    // Use transaction to ensure all user data is deleted
+    await sql.begin(async sql => {
+      // Delete from all related tables
+      await sql`DELETE FROM leaves WHERE user_id = ${userId}`;
+      await sql`DELETE FROM leave_entitlements WHERE user_id = ${userId}`;
+      await sql`DELETE FROM employee_details WHERE user_id = ${userId}`;
+      await sql`DELETE FROM users WHERE id = ${userId}`;
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw error;
+  }
+};
+
+// Add this function to get user calendar data
+export const getUserCalendar = async (userId, year, month) => {
+  console.log('Fetching calendar for user ID:', userId, 'Year:', year, 'Month:', month);
+  
+  try {
+    let query = sql`
+      SELECT 
+        id, 
+        leave_type,
+        start_date,
+        end_date,
+        status,
+        total_days,
+        created_at
+      FROM leaves 
+      WHERE user_id = ${userId}
+    `;
+    
+    if (year) {
+      query = sql`${query} AND EXTRACT(YEAR FROM start_date) = ${year}`;
+    }
+    
+    if (month) {
+      query = sql`${query} AND EXTRACT(MONTH FROM start_date) = ${month}`;
+    }
+    
+    query = sql`${query} ORDER BY start_date`;
+    
+    const leaves = await query;
+    
+    // Format for calendar
+    const events = leaves.map(leave => ({
+      id: leave.id,
+      title: `${leave.leave_type} (${leave.status})`,
+      start: new Date(leave.start_date),
+      end: new Date(new Date(leave.end_date).setDate(new Date(leave.end_date).getDate() + 1)),
+      allDay: true,
+      extendedProps: {
+        type: leave.leave_type,
+        status: leave.status,
+        days: leave.total_days
+      }
+    }));
+    
+    return events;
+  } catch (error) {
+    console.error('Error fetching user calendar:', error);
+    throw error;
+  }
+};
+
+// Add this function to get user full details
+export const getUserFullDetails = async (userId) => {
+  console.log('Fetching full details for user ID:', userId);
+  
+  try {
+    // Get user basic info with manager details
+    const [user] = await sql`
+      SELECT 
+        u.*, 
+        ed.employment_type, 
+        ed.confirmation_date,
+        ed.probation_start_date,
+        ed.probation_end_date,
+        m.name as manager_name,
+        m.email as manager_email
+      FROM users u
+      LEFT JOIN employee_details ed ON u.id = ed.user_id
+      LEFT JOIN users m ON u.manager_id = m.id
+      WHERE u.id = ${userId}
+    `;
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Get leave entitlements for current year
+    const currentYear = new Date().getFullYear();
+    const [leaveEntitlements] = await sql`
+      SELECT * FROM leave_entitlements 
+      WHERE user_id = ${userId} AND year = ${currentYear}
+    `;
+
+    // Get all leaves (for calendar)
+    const allLeaves = await sql`
+      SELECT * FROM leaves 
+      WHERE user_id = ${userId} 
+      ORDER BY created_at DESC
+    `;
+
+    // Get leave statistics
+    const [leaveStats] = await sql`
+      SELECT 
+        COUNT(*) as total_leaves, 
+        SUM(total_days) as total_days,
+        COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_leaves,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_leaves,
+        COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_leaves
+      FROM leaves 
+      WHERE user_id = ${userId}
+    `;
+
+    // Get employment duration
+    let employmentDuration = null;
+    if (user.confirmation_date) {
+      const startDate = new Date(user.confirmation_date);
+      const today = new Date();
+      const diffTime = Math.abs(today - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      employmentDuration = {
+        days: diffDays,
+        months: Math.floor(diffDays / 30),
+        years: Math.floor(diffDays / 365)
+      };
+    }
+
+    return {
+      user,
+      leave_entitlements: leaveEntitlements || {},
+      leaves: allLeaves || [],
+      leave_stats: leaveStats || { 
+        total_leaves: 0, 
+        total_days: 0,
+        approved_leaves: 0,
+        pending_leaves: 0,
+        rejected_leaves: 0
+      },
+      employment_duration: employmentDuration
+    };
+  } catch (error) {
+    console.error('Error fetching user full details:', error);
+    throw error;
+  }
 };

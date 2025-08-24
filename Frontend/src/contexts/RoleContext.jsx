@@ -16,11 +16,13 @@ export function RoleProvider({ children }) {
     const storedUser = JSON.parse(localStorage.getItem("user"));
     const storedToken = localStorage.getItem("token");
     const storedActiveRole = localStorage.getItem("activeRole");
+    const storedOriginalRole = localStorage.getItem("originalRole"); // 🆕 Store original role separately
 
     console.log('Loading user roles from storage:', {
       hasStoredUser: !!storedUser,
       hasStoredToken: !!storedToken,
-      storedActiveRole
+      storedActiveRole,
+      storedOriginalRole
     });
 
     if (storedUser && storedToken) {
@@ -45,17 +47,21 @@ export function RoleProvider({ children }) {
         const data = await res.json();
         console.log('User data from /me endpoint:', data);
 
-        // Use stored activeRole if available, otherwise use role from backend
-        const newActiveRole = storedActiveRole || data.activeRole || data.role || "employee";
+        // 🆕 Use stored originalRole if available, otherwise use role from backend
+        const newOriginalRole = storedOriginalRole || data.role || "employee";
+        
+        // 🆕 Use stored activeRole if available, otherwise use original role
+        const newActiveRole = storedActiveRole || data.activeRole || newOriginalRole || "employee";
         
         setUser(data);
         setToken(storedToken);
-        setOriginalRole(data.role || "employee");
+        setOriginalRole(newOriginalRole);
         setActiveRole(newActiveRole);
 
-        // Update localStorage
+        // 🆕 Update localStorage with both roles
         localStorage.setItem("user", JSON.stringify(data));
         localStorage.setItem("activeRole", newActiveRole);
+        localStorage.setItem("originalRole", newOriginalRole); // 🆕 Store original role
 
       } catch (err) {
         console.log("Token validation failed, logging out", err);
@@ -87,14 +93,19 @@ export function RoleProvider({ children }) {
   const login = (newUser, newToken) => {
     console.log('Logging in user:', newUser.id);
     
+    // 🆕 Store both original role and active role
+    const userOriginalRole = newUser.role || "employee";
+    const userActiveRole = newUser.activeRole || userOriginalRole;
+    
     localStorage.setItem("user", JSON.stringify(newUser));
     localStorage.setItem("token", newToken);
-    localStorage.setItem("activeRole", newUser.activeRole || newUser.role || "employee");
+    localStorage.setItem("activeRole", userActiveRole);
+    localStorage.setItem("originalRole", userOriginalRole); // 🆕 Store original role
 
     setUser(newUser);
     setToken(newToken);
-    setOriginalRole(newUser.role || "employee");
-    setActiveRole(newUser.activeRole || newUser.role || "employee");
+    setOriginalRole(userOriginalRole);
+    setActiveRole(userActiveRole);
   };
 
   // Logout: clear everything
@@ -104,6 +115,7 @@ export function RoleProvider({ children }) {
     localStorage.removeItem("user");
     localStorage.removeItem("token");
     localStorage.removeItem("activeRole");
+    localStorage.removeItem("originalRole"); // 🆕 Remove original role
     resetRoles();
   };
 
@@ -147,11 +159,12 @@ export function RoleProvider({ children }) {
         const data = await res.json();
         console.log('Role switch successful:', data);
 
-        // Update state and localStorage
+        // 🆕 Update state and localStorage - keep original role unchanged
         const updatedUser = { ...user, activeRole: newRole };
         localStorage.setItem("user", JSON.stringify(updatedUser));
         localStorage.setItem("token", data.token);
         localStorage.setItem("activeRole", newRole);
+        // 🆕 originalRole remains unchanged in localStorage
 
         setActiveRole(newRole);
         setUser(updatedUser);
@@ -180,6 +193,26 @@ export function RoleProvider({ children }) {
     }
   };
 
+  // 🆕 Helper function to check if user is in their original role view
+  const isInOriginalRoleView = () => {
+    return activeRole === originalRole;
+  };
+
+  // 🆕 Helper function to check if user is in admin view
+  const isInAdminView = () => {
+    return originalRole === "admin" && activeRole === "admin";
+  };
+
+  // 🆕 Helper function to check if user is in manager view
+  const isInManagerView = () => {
+    return originalRole === "manager" && activeRole === "manager";
+  };
+
+  // 🆕 Helper function to check if user is in employee view (switched from admin/manager)
+  const isInEmployeeView = () => {
+    return activeRole === "employee" && originalRole !== "employee";
+  };
+
   return (
     <RoleContext.Provider
       value={{
@@ -193,6 +226,10 @@ export function RoleProvider({ children }) {
         switchRole,
         resetRoles,
         loading,
+        isInOriginalRoleView, // 🆕 Export helper functions
+        isInAdminView,
+        isInManagerView,
+        isInEmployeeView,
       }}
     >
       {children}

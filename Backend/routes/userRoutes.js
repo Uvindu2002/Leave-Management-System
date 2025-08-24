@@ -5,7 +5,13 @@ import {
   switchRole, 
   getManagers, 
   getMe, 
-  getAllUsers 
+  getAllUsers,
+  deleteUser,
+  updateUser,
+  getUserDetails,
+  getUserFullDetails,
+  getUserCalendar,
+  getUserLeaves
 } from '../controllers/userController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -20,5 +26,11 @@ router.post('/switch-role', protect, switchRole);
 router.get('/managers', protect, getManagers);
 router.get('/me', protect, getMe);
 router.get('/all', protect, getAllUsers);
+router.get('/:id/details', protect, getUserDetails);
+router.get('/:id/full-details', protect, getUserFullDetails);
+router.get('/:id/calendar', protect, getUserCalendar);
+router.put('/:id', protect, updateUser);
+router.delete('/:id', protect, deleteUser);
+router.get('/:id/leaves', protect, getUserLeaves);
 
 export default router;
