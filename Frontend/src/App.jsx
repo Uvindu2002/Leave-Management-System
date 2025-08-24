@@ -4,11 +4,12 @@ import Login from "./pages/Login";
 import DashboardWrapper from "./components/DashboardWrapper";
 import CreateUser from "./pages/admin/CreateUser";
 import UserManagement from "./pages/admin/UserManagement";
-import UserView from "./pages/admin/UserView"; // ✅ Add missing import
-import UserEdit from "./pages/admin/UserEdit"; // ✅ Add missing import
-import Header from "./components/Header";
-import Layout from "./components/Layout";
+import UserView from "./pages/admin/UserView";
+import UserEdit from "./pages/admin/UserEdit";
 import ApplyLeave from "./pages/employee/ApplyLeave";
+import Layout from "./components/Layout";
+import Sidebar from "./components/Sidebar";
+import Header from "./components/Header";
 
 // ProtectedRoute component
 function ProtectedRoute({ children, requiredRole }) {
@@ -37,24 +38,29 @@ function ProtectedRoute({ children, requiredRole }) {
     }
   }
 
+  // For manager routes, check if user is actually in manager view
+  if (requiredRole === "manager") {
+    const isInManagerView = originalRole === "manager" && activeRole === "manager";
+    if (!isInManagerView) {
+      return <Navigate to="/dashboard" replace />;
+    }
+  }
+
   // Role-based access
-  if (requiredRole && user.role !== requiredRole) {
+  if (requiredRole && originalRole !== requiredRole) {
     return <Navigate to="/dashboard" replace />;
   }
 
   return children;
 }
 
-// Layout wrapper for protected routes
-function ProtectedLayout({ children }) {
+// Main App Layout with Sidebar and Header
+function AppLayout({ children }) {
   const { user } = useRole();
-
+  
   return (
-    <Layout>
-      <Header user={user} />
-      <main className="flex-1 p-4">
-        {children}
-      </main>
+    <Layout user={user}>
+      {children}
     </Layout>
   );
 }
@@ -70,9 +76,9 @@ function AppRoutes() {
         path="/admin/create-user"
         element={
           <ProtectedRoute requiredRole="admin">
-            <ProtectedLayout>
+            <AppLayout>
               <CreateUser />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -81,9 +87,9 @@ function AppRoutes() {
         path="/admin/users"
         element={
           <ProtectedRoute requiredRole="admin">
-            <ProtectedLayout>
+            <AppLayout>
               <UserManagement />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -93,9 +99,9 @@ function AppRoutes() {
         path="/admin/users/view/:id"
         element={
           <ProtectedRoute requiredRole="admin">
-            <ProtectedLayout>
+            <AppLayout>
               <UserView />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -105,9 +111,9 @@ function AppRoutes() {
         path="/admin/users/edit/:id"
         element={
           <ProtectedRoute requiredRole="admin">
-            <ProtectedLayout>
+            <AppLayout>
               <UserEdit />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -117,50 +123,98 @@ function AppRoutes() {
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <ProtectedLayout>
+            <AppLayout>
               <DashboardWrapper />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
 
-      {/* Employee dashboard route */}
-      <Route
-        path="/employee/dashboard"
-        element={
-          <ProtectedRoute>
-            <ProtectedLayout>
-              <DashboardWrapper />
-            </ProtectedLayout>
-          </ProtectedRoute>
-        }
-      />
-
+      {/* Apply Leave route */}
       <Route
         path="/apply-leave"
         element={
           <ProtectedRoute>
-            <ProtectedLayout>
+            <AppLayout>
               <ApplyLeave />
-            </ProtectedLayout>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
 
-      {/* Manager dashboard route */}
+      {/* My Leaves route */}
       <Route
-        path="/manager/dashboard"
+        path="/my-leaves"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <div className="max-w-4xl mx-auto">
+                <h1 className="text-2xl font-bold mb-6">My Leave Applications</h1>
+                {/* You'll need to create a MyLeaves component */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <p className="text-gray-600">My leaves component will go here</p>
+                </div>
+              </div>
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Manager routes */}
+      <Route
+        path="/manager/leaves"
         element={
           <ProtectedRoute requiredRole="manager">
-            <ProtectedLayout>
-              <DashboardWrapper />
-            </ProtectedLayout>
+            <AppLayout>
+              <div className="max-w-6xl mx-auto">
+                <h1 className="text-2xl font-bold mb-6">Leave Approvals</h1>
+                {/* You'll need to create a ManagerLeaves component */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <p className="text-gray-600">Leave approvals component will go here</p>
+                </div>
+              </div>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
 
-      {/* Catch-all: redirect unknown routes to appropriate pages */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route
+        path="/manager/team"
+        element={
+          <ProtectedRoute requiredRole="manager">
+            <AppLayout>
+              <div className="max-w-6xl mx-auto">
+                <h1 className="text-2xl font-bold mb-6">My Team</h1>
+                {/* You'll need to create a ManagerTeam component */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <p className="text-gray-600">Team management component will go here</p>
+                </div>
+              </div>
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Profile route */}
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <div className="max-w-4xl mx-auto">
+                <h1 className="text-2xl font-bold mb-6">My Profile</h1>
+                {/* You'll need to create a Profile component */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <p className="text-gray-600">Profile component will go here</p>
+                </div>
+              </div>
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Catch-all: redirect unknown routes to dashboard */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
