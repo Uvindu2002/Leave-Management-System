@@ -65,21 +65,32 @@ export default function AdminDashboard() {
         pendingLeavesThisWeek: leavesThisWeek.filter(leave => leave.status === 'pending').length
       });
 
-      // Transform leaves for calendar
-      const calendarEvents = leaves.map(leave => ({
-        id: leave.id,
-        title: `${leave.employee_name} - ${leave.leave_type}`,
-        start: new Date(leave.start_date),
-        end: new Date(new Date(leave.end_date).setDate(new Date(leave.end_date).getDate() + 1)),
-        allDay: true,
-        resource: {
-          type: leave.leave_type,
-          status: leave.status,
-          days: leave.total_days,
-          employee: leave.employee_name,
-          employeeId: leave.user_id
-        }
-      }));
+      // Transform leaves for calendar - FIXED: Proper 1-day event handling
+      const calendarEvents = leaves.map(leave => {
+        const startDate = new Date(leave.start_date);
+        const endDate = new Date(leave.end_date);
+        
+        // For single day leaves, end date should be the same as start date
+        // For multi-day leaves, end date should be inclusive
+        const isSingleDay = startDate.toDateString() === endDate.toDateString();
+        const calendarEndDate = isSingleDay ? startDate : endDate;
+        
+        return {
+          id: leave.id,
+          title: `${leave.employee_name} - ${leave.leave_type}`,
+          start: startDate,
+          end: calendarEndDate,
+          allDay: true,
+          resource: {
+            type: leave.leave_type,
+            status: leave.status,
+            days: leave.total_days,
+            employee: leave.employee_name,
+            employeeId: leave.user_id,
+            isSingleDay: isSingleDay
+          }
+        };
+      });
 
       setAllLeaves(calendarEvents);
 
@@ -124,6 +135,20 @@ export default function AdminDashboard() {
         padding: '2px 4px'
       }
     };
+  };
+
+  // Custom event component to handle single day display
+  const CustomEvent = ({ event }) => {
+    return (
+      <div className="rbc-event-content">
+        <div className="text-xs font-medium truncate">
+          {event.resource.employee}
+        </div>
+        <div className="text-[10px] opacity-75">
+          {event.resource.type} • {event.resource.status}
+        </div>
+      </div>
+    );
   };
 
   const CustomToolbar = (toolbar) => {
@@ -201,7 +226,11 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="p-6 max-w-7xl mx-auto">
-       
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+          <p className="text-gray-600">Manage your team's leaves and activities</p>
+        </div>
 
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -301,9 +330,9 @@ export default function AdminDashboard() {
               onNavigate={setDate}
               eventPropGetter={eventStyleGetter}
               components={{
-                toolbar: CustomToolbar
+                toolbar: CustomToolbar,
+                event: CustomEvent
               }}
-              popup
               showMultiDayTimes
               step={60}
               formats={{
@@ -316,6 +345,39 @@ export default function AdminDashboard() {
               }}
             />
           </div>
+
+          {/* Leave Summary */}
+          {allLeaves.length > 0 && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-900 mb-3">Leave Summary</h4>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                <div className="text-center p-2 bg-blue-50 rounded">
+                  <div className="text-blue-800 font-semibold text-sm">
+                    {allLeaves.length}
+                  </div>
+                  <div className="text-blue-600">Total Leaves</div>
+                </div>
+                <div className="text-center p-2 bg-green-50 rounded">
+                  <div className="text-green-800 font-semibold text-sm">
+                    {allLeaves.filter(e => e.resource.status === 'approved').length}
+                  </div>
+                  <div className="text-green-600">Approved</div>
+                </div>
+                <div className="text-center p-2 bg-yellow-50 rounded">
+                  <div className="text-yellow-800 font-semibold text-sm">
+                    {allLeaves.filter(e => e.resource.status === 'pending').length}
+                  </div>
+                  <div className="text-yellow-600">Pending</div>
+                </div>
+                <div className="text-center p-2 bg-red-50 rounded">
+                  <div className="text-red-800 font-semibold text-sm">
+                    {allLeaves.filter(e => e.resource.status === 'rejected').length}
+                  </div>
+                  <div className="text-red-600">Rejected</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import sql from "./db.js"; // <-- your db connection
 
 import userRoutes from './routes/userRoutes.js';
 import leaveRoutes from './routes/leaveRoutes.js';
+import managerRoutes from './routes/managerRoutes.js';
 
 dotenv.config();
 
@@ -17,6 +18,7 @@ app.use(express.json());
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/leaves', leaveRoutes);
+app.use('/api/manager', managerRoutes);
 
 // Test DB connection
 app.get("/api/test-db", async (req, res) => {

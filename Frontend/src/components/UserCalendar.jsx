@@ -32,20 +32,31 @@ export default function UserCalendar({ userId }) {
         
         const leaves = await res.json();
         
-        // Transform leaves into calendar events
-        const calendarEvents = leaves.map(leave => ({
-          id: leave.id,
-          title: `${leave.leave_type} - ${leave.status}`,
-          start: new Date(leave.start_date),
-          end: new Date(new Date(leave.end_date).setDate(new Date(leave.end_date).getDate() + 1)), // Add 1 day to include end date
-          allDay: true,
-          resource: {
-            type: leave.leave_type,
-            status: leave.status,
-            days: leave.total_days,
-            leaveData: leave
-          }
-        }));
+        // Transform leaves into calendar events - FIXED: Proper 1-day event handling
+        const calendarEvents = leaves.map(leave => {
+          const startDate = new Date(leave.start_date);
+          const endDate = new Date(leave.end_date);
+          
+          // For single day leaves, end date should be the same as start date
+          // For multi-day leaves, end date should be inclusive
+          const isSingleDay = startDate.toDateString() === endDate.toDateString();
+          const calendarEndDate = isSingleDay ? startDate : endDate;
+          
+          return {
+            id: leave.id,
+            title: `${leave.leave_type} - ${leave.status}`,
+            start: startDate,
+            end: calendarEndDate,
+            allDay: true,
+            resource: {
+              type: leave.leave_type,
+              status: leave.status,
+              days: leave.total_days,
+              leaveData: leave,
+              isSingleDay: isSingleDay
+            }
+          };
+        });
         
         setEvents(calendarEvents);
       } catch (err) {
@@ -148,7 +159,7 @@ export default function UserCalendar({ userId }) {
         </div>
         
         <div className="flex items-center gap-1 bg-gray-100 rounded-md p-1">
-          {['month', 'week', 'day', 'agenda'].map((viewName) => (
+          {['month', 'week', 'day'].map((viewName) => (
             <button
               key={viewName}
               onClick={() => changeView(viewName)}
@@ -166,11 +177,18 @@ export default function UserCalendar({ userId }) {
     );
   };
 
-  // Custom header with status indicators
-  const CustomHeader = ({ label }) => {
+  // Custom event component to handle single day display
+  const CustomEvent = ({ event }) => {
     return (
-      <div className="rbc-header text-xs font-medium text-gray-600 py-2">
-        {label}
+      <div className="rbc-event-content">
+        <div className="text-xs font-medium">
+          {event.resource.type}
+        </div>
+        <div className="text-[10px] opacity-75">
+          {event.resource.status}
+          {event.resource.isSingleDay && ` • ${event.resource.days} day`}
+          {!event.resource.isSingleDay && ` • ${event.resource.days} days`}
+        </div>
       </div>
     );
   };
@@ -243,9 +261,8 @@ export default function UserCalendar({ userId }) {
           eventPropGetter={eventStyleGetter}
           components={{
             toolbar: CustomToolbar,
-            header: CustomHeader
+            event: CustomEvent
           }}
-          popup
           showMultiDayTimes
           step={60}
           formats={{
@@ -260,10 +277,6 @@ export default function UserCalendar({ userId }) {
             month: "Month",
             week: "Week",
             day: "Day",
-            agenda: "Agenda",
-            date: "Date",
-            time: "Time",
-            event: "Event",
             noEventsInRange: "No leaves in this period"
           }}
         />
@@ -273,21 +286,27 @@ export default function UserCalendar({ userId }) {
       {events.length > 0 && (
         <div className="mt-6 p-4 bg-gray-50 rounded-lg">
           <h4 className="text-sm font-medium text-gray-900 mb-3">Leave Summary</h4>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+            <div className="text-center p-2 bg-blue-50 rounded">
+              <div className="text-blue-800 font-semibold text-sm">
+                {events.length}
+              </div>
+              <div className="text-blue-600">Total Leaves</div>
+            </div>
             <div className="text-center p-2 bg-green-50 rounded">
-              <div className="text-green-800 font-semibold">
+              <div className="text-green-800 font-semibold text-sm">
                 {events.filter(e => e.resource.status === 'approved').length}
               </div>
               <div className="text-green-600">Approved</div>
             </div>
             <div className="text-center p-2 bg-yellow-50 rounded">
-              <div className="text-yellow-800 font-semibold">
+              <div className="text-yellow-800 font-semibold text-sm">
                 {events.filter(e => e.resource.status === 'pending').length}
               </div>
               <div className="text-yellow-600">Pending</div>
             </div>
             <div className="text-center p-2 bg-red-50 rounded">
-              <div className="text-red-800 font-semibold">
+              <div className="text-red-800 font-semibold text-sm">
                 {events.filter(e => e.resource.status === 'rejected').length}
               </div>
               <div className="text-red-600">Rejected</div>
