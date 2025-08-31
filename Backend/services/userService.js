@@ -76,9 +76,17 @@ const initializeLeaveEntitlements = async (sql, userId, year, employmentType, co
     annualEntitlement = [14, 10, 7, 4][quarter - 1] || 0;
     casualEntitlement = 7;
   } else if (employmentType === 'probation' || employmentType === 'internship') {
-    // Probation/Internship: 1 day casual leave per completed month
-    // Start with 0, will be accrued monthly
-    casualEntitlement = 0;
+    // Probation/Internship: 1 day casual leave per completed month since confirmation/probation start
+    if (confirmationDate) {
+      const start = new Date(confirmationDate);
+      const now = new Date();
+      let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+      if (now.getDate() >= start.getDate()) months += 1; // count current month if day passed
+      casualEntitlement = Math.max(0, months);
+    } else {
+      casualEntitlement = 0;
+    }
+    
   }
 
   // Insert leave entitlements within the same transaction
