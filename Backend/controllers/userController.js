@@ -249,6 +249,7 @@ export const deleteUser = async (req, res) => {
   }
 };
 
+// Update the getUserCalendar function in userController.js
 export const getUserCalendar = async (req, res) => {
   try {
     const { id } = req.params;
@@ -262,6 +263,8 @@ export const getUserCalendar = async (req, res) => {
         end_date,
         status,
         total_days,
+        is_non_paid,
+        non_paid_days,
         created_at
       FROM leaves 
       WHERE user_id = ${id}
@@ -280,18 +283,29 @@ export const getUserCalendar = async (req, res) => {
     const leaves = await query;
     
     // Format for calendar
-    const events = leaves.map(leave => ({
-      id: leave.id,
-      title: `${leave.leave_type} (${leave.status})`,
-      start: new Date(leave.start_date),
-      end: new Date(new Date(leave.end_date).setDate(new Date(leave.end_date).getDate() + 1)),
-      allDay: true,
-      extendedProps: {
-        type: leave.leave_type,
-        status: leave.status,
-        days: leave.total_days
-      }
-    }));
+    const events = leaves.map(leave => {
+      const startDate = new Date(leave.start_date);
+      const endDate = new Date(leave.end_date);
+      
+      const isSingleDay = startDate.toDateString() === endDate.toDateString();
+      const calendarEndDate = isSingleDay ? startDate : endDate;
+      
+      return {
+        id: leave.id,
+        title: `${leave.leave_type} (${leave.status})${leave.is_non_paid ? ' - Non-Paid' : ''}`,
+        start: startDate,
+        end: calendarEndDate,
+        allDay: true,
+        resource: {
+          type: leave.leave_type,
+          status: leave.status,
+          days: leave.total_days,
+          is_non_paid: leave.is_non_paid,
+          non_paid_days: leave.non_paid_days,
+          isSingleDay: isSingleDay
+        }
+      };
+    });
     
     res.json(events);
   } catch (error) {

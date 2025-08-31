@@ -1,5 +1,80 @@
 import sql from '../db.js';
 
+// Helper function to calculate months completed
+const calculateMonthsCompleted = (startDate) => {
+  const today = new Date();
+  const start = new Date(startDate);
+  
+  let months = (today.getFullYear() - start.getFullYear()) * 12;
+  months -= start.getMonth();
+  months += today.getMonth();
+  
+  return months <= 0 ? 0 : months;
+};
+
+// NEW: Helper to count already-used non-paid days in current month (approved + pending)
+const getUsedNonPaidDaysThisMonth = async (userId) => {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  const [row] = await sql`
+    SELECT COALESCE(SUM(non_paid_days), 0) AS used
+    FROM leaves
+    WHERE user_id = ${userId}
+      AND is_non_paid = true
+      AND status IN ('approved', 'pending')
+      AND start_date >= ${startOfMonth}
+      AND start_date <= ${endOfMonth}
+  `;
+  return Number(row?.used || 0);
+};
+
+// UPDATED: Helper function to check probation/confirmed leave eligibility
+const checkProbationLeaveEligibility = async (userId, leaveType, totalDays, currentYear) => {
+  // Only enforce splitting logic on casual leaves
+  if (leaveType !== 'casual') {
+    return { eligible: true, paidDays: totalDays, nonPaidDays: 0, allowedNonPaidLeft: 0 };
+  }
+
+  // Get user employment type and current balance
+  const [userDetails] = await sql`
+    SELECT ed.employment_type, le.casual_leave_remaining
+    FROM employee_details ed
+    LEFT JOIN leave_entitlements le ON ed.user_id = le.user_id 
+      AND le.year = ${currentYear}
+    WHERE ed.user_id = ${userId}
+  `;
+
+  const employmentType = userDetails?.employment_type;
+  const availablePaidLeaves = Number(userDetails?.casual_leave_remaining || 0);
+  const paidDays = Math.min(Number(totalDays), availablePaidLeaves);
+  const nonPaidDays = Math.max(0, Number(totalDays) - paidDays);
+
+  // Enforce up to 1 non-paid day per month (count what's already used this month)
+  const usedNonPaidThisMonth = await getUsedNonPaidDaysThisMonth(userId);
+  const monthlyLimit = 1;
+  const allowedNonPaidLeft = Math.max(0, monthlyLimit - usedNonPaidThisMonth);
+
+  // For confirmed and probation/internship, allow split but enforce limit
+  if (employmentType === 'confirmed' || employmentType === 'probation' || employmentType === 'internship') {
+    return {
+      eligible: nonPaidDays <= allowedNonPaidLeft,
+      paidDays,
+      nonPaidDays,
+      allowedNonPaidLeft
+    };
+  }
+
+  // Default case (unknown employment): behave like confirmed
+  return {
+    eligible: nonPaidDays <= allowedNonPaidLeft,
+    paidDays,
+    nonPaidDays,
+    allowedNonPaidLeft
+  };
+};
+
 export const applyForLeave = async (req, res) => {
   try {
     console.log('Leave application request received:', req.body);
@@ -35,20 +110,34 @@ export const applyForLeave = async (req, res) => {
       });
     }
 
-    // Validate leave balance
     const currentYear = new Date().getFullYear();
+    
+    // Check leave eligibility
+    const eligibility = await checkProbationLeaveEligibility(
+      req.user.userId, 
+      leave_type, 
+      total_days,
+      currentYear
+    );
+
+    if (!eligibility.eligible) {
+      return res.status(400).json({ 
+        message: `Leave request exceeds allowed limits. Non-paid days left this month: ${eligibility.allowedNonPaidLeft ?? 0}. Available paid leaves to apply: ${eligibility.paidDays}. Requested total: ${total_days}`
+      });
+    }
+
+    // Get or create leave balance
     let [leaveBalance] = await sql`
       SELECT * FROM leave_entitlements 
       WHERE user_id = ${req.user.userId} AND year = ${currentYear}
     `;
 
-    // If no entitlements found, create them
     if (!leaveBalance) {
       console.log('Creating missing leave entitlements for user:', req.user.userId);
       
       // Get user's employment type
       const [userDetails] = await sql`
-        SELECT ed.employment_type, ed.confirmation_date 
+        SELECT ed.employment_type, ed.confirmation_date, ed.probation_start_date
         FROM employee_details ed
         WHERE ed.user_id = ${req.user.userId}
       `;
@@ -60,6 +149,11 @@ export const applyForLeave = async (req, res) => {
         const quarter = Math.floor((new Date(userDetails.confirmation_date).getMonth() + 3) / 3);
         annualEntitlement = [14, 10, 7, 4][quarter - 1] || 0;
         casualEntitlement = 7;
+      } else if (userDetails?.employment_type === 'probation' || userDetails?.employment_type === 'internship') {
+        // For probation/internship, calculate based on months completed
+        const startDate = new Date(userDetails?.probation_start_date || new Date());
+        const monthsCompleted = calculateMonthsCompleted(startDate);
+        casualEntitlement = monthsCompleted;
       } else {
         casualEntitlement = 1;
       }
@@ -77,18 +171,24 @@ export const applyForLeave = async (req, res) => {
       `;
     }
 
-    // Check leave balance based on leave type
-    if (leave_type === 'casual') {
-      if (total_days > leaveBalance.casual_leave_remaining) {
-        return res.status(400).json({ 
-          message: `Not enough casual leave balance. Available: ${leaveBalance.casual_leave_remaining}, Requested: ${total_days}` 
-        });
-      }
-    } else if (leave_type === 'annual') {
-      if (total_days > leaveBalance.annual_leave_remaining) {
-        return res.status(400).json({ 
-          message: `Not enough annual leave balance. Available: ${leaveBalance.annual_leave_remaining}, Requested: ${total_days}` 
-        });
+    // Update leave balance if it's a paid leave
+    if (eligibility.paidDays > 0) {
+      if (leave_type === 'casual') {
+        await sql`
+          UPDATE leave_entitlements 
+          SET casual_leave_remaining = casual_leave_remaining - ${eligibility.paidDays},
+              casual_leave_taken = COALESCE(casual_leave_taken, 0) + ${eligibility.paidDays},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ${req.user.userId} AND year = ${currentYear}
+        `;
+      } else if (leave_type === 'annual') {
+        await sql`
+          UPDATE leave_entitlements 
+          SET annual_leave_remaining = annual_leave_remaining - ${eligibility.paidDays},
+              annual_leave_taken = COALESCE(annual_leave_taken, 0) + ${eligibility.paidDays},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ${req.user.userId} AND year = ${currentYear}
+        `;
       }
     }
 
@@ -99,7 +199,8 @@ export const applyForLeave = async (req, res) => {
         casual_leave_type, which_half, short_leave_out_time, short_leave_in_time,
         other_leave_type, has_attended_bots, attended_bots_count, bots_monitor,
         email_autoforward, has_client_calls, call_leader, passwords_on_lastpass,
-        passwords_shared, projects, comments, job_handover_person, manager_id
+        passwords_shared, projects, comments, job_handover_person, manager_id,
+        is_non_paid, paid_days, non_paid_days
       ) VALUES (
         ${req.user.userId}, ${leave_type}, ${start_date}, ${end_date}, ${total_days}, 'pending',
         ${casual_leave_type || null}, ${which_half || null}, 
@@ -110,7 +211,10 @@ export const applyForLeave = async (req, res) => {
         ${call_leader || null}, ${passwords_on_lastpass || false},
         ${passwords_shared || false}, ${projects || null}, 
         ${comments || null}, ${job_handover_person}, 
-        ${req.user.manager_id || null}
+        ${req.user.manager_id || null},
+        ${eligibility.nonPaidDays > 0}, 
+        ${eligibility.paidDays}, 
+        ${eligibility.nonPaidDays}
       ) RETURNING *
     `;
 
@@ -118,7 +222,9 @@ export const applyForLeave = async (req, res) => {
 
     res.status(201).json({ 
       message: 'Leave application submitted successfully',
-      leave 
+      leave,
+      paidDays: eligibility.paidDays,
+      nonPaidDays: eligibility.nonPaidDays
     });
 
   } catch (error) {
@@ -136,8 +242,10 @@ export const getLeaveBalance = async (req, res) => {
     
     const currentYear = new Date().getFullYear();
     let [balance] = await sql`
-      SELECT * FROM leave_entitlements 
-      WHERE user_id = ${req.user.userId} AND year = ${currentYear}
+      SELECT le.*, ed.employment_type, ed.probation_start_date
+      FROM leave_entitlements le
+      LEFT JOIN employee_details ed ON le.user_id = ed.user_id
+      WHERE le.user_id = ${req.user.userId} AND le.year = ${currentYear}
     `;
 
     // If no balance found, create default entitlements
@@ -146,7 +254,7 @@ export const getLeaveBalance = async (req, res) => {
       
       // Get user details to determine proper entitlements
       const [userDetails] = await sql`
-        SELECT ed.employment_type, ed.confirmation_date 
+        SELECT ed.employment_type, ed.confirmation_date, ed.probation_start_date
         FROM employee_details ed
         WHERE ed.user_id = ${req.user.userId}
       `;
@@ -158,8 +266,12 @@ export const getLeaveBalance = async (req, res) => {
         const quarter = Math.floor((new Date(userDetails.confirmation_date).getMonth() + 3) / 3);
         annualEntitlement = [14, 10, 7, 4][quarter - 1] || 0;
         casualEntitlement = 7;
+      } else if (userDetails?.employment_type === 'probation' || userDetails?.employment_type === 'internship') {
+        // For probation/internship, calculate based on months completed
+        const startDate = new Date(userDetails?.probation_start_date || new Date());
+        const monthsCompleted = calculateMonthsCompleted(startDate);
+        casualEntitlement = monthsCompleted;
       } else {
-        // Default to probation values if no employment type found
         casualEntitlement = 1;
       }
 
@@ -188,7 +300,6 @@ export const getLeaveBalance = async (req, res) => {
   }
 };
 
-
 export const getAllLeaves = async (req, res) => {
   try {
     const leaves = await sql`
@@ -201,5 +312,69 @@ export const getAllLeaves = async (req, res) => {
   } catch (error) {
     console.error('Get all leaves error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Manual leave accrual function for probation/internship employees
+export const accrueMonthlyLeaves = async (req, res) => {
+  try {
+    console.log('Manual leave accrual triggered');
+    
+    const currentYear = new Date().getFullYear();
+    
+    // Get all probation and internship employees
+    const probationEmployees = await sql`
+      SELECT u.id as user_id, ed.employment_type, ed.probation_start_date
+      FROM users u
+      JOIN employee_details ed ON u.id = ed.user_id
+      WHERE ed.employment_type IN ('probation', 'internship')
+    `;
+
+    let processedCount = 0;
+
+    for (const employee of probationEmployees) {
+      const { user_id, employment_type, probation_start_date } = employee;
+      
+      // Calculate months completed
+      const startDate = new Date(probation_start_date || new Date());
+      const monthsCompleted = calculateMonthsCompleted(startDate);
+
+      if (monthsCompleted > 0) {
+        // Get current leave balance
+        const [currentEntitlement] = await sql`
+          SELECT casual_leave_remaining, casual_leave_entitled 
+          FROM leave_entitlements 
+          WHERE user_id = ${user_id} AND year = ${currentYear}
+        `;
+
+        // Calculate new entitlement (1 leave per completed month)
+        const newEntitlement = monthsCompleted;
+        const newBalance = (currentEntitlement?.casual_leave_remaining || 0) + 1; // Add 1 leave for this month
+
+        // Update leave entitlements
+        await sql`
+          UPDATE leave_entitlements 
+          SET 
+            casual_leave_entitled = ${newEntitlement},
+            casual_leave_remaining = ${newBalance},
+            updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ${user_id} AND year = ${currentYear}
+        `;
+
+        processedCount++;
+        console.log(`Accrued 1 leave for user ${user_id}. New balance: ${newBalance}`);
+      }
+    }
+
+    res.json({ 
+      message: `Monthly leave accrual completed. Processed ${processedCount} employees.` 
+    });
+
+  } catch (error) {
+    console.error('Monthly leave accrual error:', error);
+    res.status(500).json({ 
+      message: 'Server error: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };

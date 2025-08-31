@@ -65,6 +65,7 @@ export const createUser = async (userData) => {
   }
 };
 
+// Replace the existing initializeLeaveEntitlements function
 const initializeLeaveEntitlements = async (sql, userId, year, employmentType, confirmationDate) => {
   let annualEntitlement = 0;
   let casualEntitlement = 0;
@@ -74,9 +75,10 @@ const initializeLeaveEntitlements = async (sql, userId, year, employmentType, co
     const quarter = Math.floor((new Date(confirmationDate).getMonth() + 3) / 3);
     annualEntitlement = [14, 10, 7, 4][quarter - 1] || 0;
     casualEntitlement = 7;
-  } else if (employmentType === 'probation') {
-    // Probation: 1 day casual leave per completed month
-    casualEntitlement = 1;
+  } else if (employmentType === 'probation' || employmentType === 'internship') {
+    // Probation/Internship: 1 day casual leave per completed month
+    // Start with 0, will be accrued monthly
+    casualEntitlement = 0;
   }
 
   // Insert leave entitlements within the same transaction
@@ -94,7 +96,6 @@ const initializeLeaveEntitlements = async (sql, userId, year, employmentType, co
 
   console.log('Leave entitlements initialized for user:', userId);
 };
-
 export const loginUser = async (email, password) => {
   console.log('Login attempt for email:', email);
 
@@ -461,3 +462,5 @@ export const getUserFullDetails = async (userId) => {
     throw error;
   }
 };
+
+

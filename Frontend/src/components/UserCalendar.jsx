@@ -32,19 +32,20 @@ export default function UserCalendar({ userId }) {
         
         const leaves = await res.json();
         
-        // Transform leaves into calendar events - FIXED: Proper 1-day event handling
+        // Transform leaves into calendar events
         const calendarEvents = leaves.map(leave => {
           const startDate = new Date(leave.start_date);
           const endDate = new Date(leave.end_date);
           
-          // For single day leaves, end date should be the same as start date
-          // For multi-day leaves, end date should be inclusive
           const isSingleDay = startDate.toDateString() === endDate.toDateString();
           const calendarEndDate = isSingleDay ? startDate : endDate;
           
+          // Determine if this is a non-paid leave (including pending ones)
+          const isNonPaid = leave.is_non_paid || leave.non_paid_days > 0;
+          
           return {
             id: leave.id,
-            title: `${leave.leave_type} - ${leave.status}`,
+            title: `${leave.leave_type} - ${leave.status}${isNonPaid ? ' (Non-Paid)' : ''}`,
             start: startDate,
             end: calendarEndDate,
             allDay: true,
@@ -53,7 +54,10 @@ export default function UserCalendar({ userId }) {
               status: leave.status,
               days: leave.total_days,
               leaveData: leave,
-              isSingleDay: isSingleDay
+              isSingleDay: isSingleDay,
+              isNonPaid: isNonPaid,
+              paidDays: leave.paid_days || 0,
+              nonPaidDays: leave.non_paid_days || 0
             }
           };
         });
@@ -72,28 +76,36 @@ export default function UserCalendar({ userId }) {
     }
   }, [userId, token]);
 
-  // Custom event styles based on leave status
+  // Custom event styles based on leave status and payment type
   const eventStyleGetter = (event) => {
     let backgroundColor = '#e5e7eb'; // gray - default
     let borderColor = '#d1d5db';
     let textColor = '#374151';
 
-    switch (event.resource.status) {
-      case 'approved':
-        backgroundColor = '#dcfce7'; // green
-        borderColor = '#86efac';
-        textColor = '#166534';
-        break;
-      case 'pending':
-        backgroundColor = '#fef3c7'; // yellow
-        borderColor = '#fcd34d';
-        textColor = '#92400e';
-        break;
-      case 'rejected':
-        backgroundColor = '#fee2e2'; // red
-        borderColor = '#fca5a5';
-        textColor = '#991b1b';
-        break;
+    // Non-paid leaves get dark red styling regardless of status
+    if (event.resource.isNonPaid) {
+      backgroundColor = '#dc2626'; // dark red background
+      borderColor = '#b91c1c'; // darker red border
+      textColor = '#ffffff'; // white text for better contrast
+    } else {
+      // Regular paid leave styling
+      switch (event.resource.status) {
+        case 'approved':
+          backgroundColor = '#dcfce7'; // green
+          borderColor = '#86efac';
+          textColor = '#166534';
+          break;
+        case 'pending':
+          backgroundColor = '#fef3c7'; // yellow
+          borderColor = '#fcd34d';
+          textColor = '#92400e';
+          break;
+        case 'rejected':
+          backgroundColor = '#fee2e2'; // red
+          borderColor = '#fca5a5';
+          textColor = '#991b1b';
+          break;
+      }
     }
 
     return {
@@ -109,24 +121,27 @@ export default function UserCalendar({ userId }) {
     };
   };
 
-  // Custom toolbar with Teams-like styling
+  // Custom event component to show payment status
+  const CustomEvent = ({ event }) => {
+    return (
+      <div className="rbc-event-content">
+        <div className="text-xs font-medium">
+          {event.resource.type}
+          {event.resource.isNonPaid && ' (Non-Paid)'}
+        </div>
+        <div className="text-[10px] opacity-75">
+          {event.resource.status}
+          {event.resource.isSingleDay && ` • ${event.resource.days} day`}
+          {!event.resource.isSingleDay && ` • ${event.resource.days} days`}
+          {event.resource.isNonPaid && event.resource.paidDays > 0 && 
+           ` • ${event.resource.paidDays} paid, ${event.resource.nonPaidDays} non-paid`}
+        </div>
+      </div>
+    );
+  };
+
+  // Custom toolbar component
   const CustomToolbar = (toolbar) => {
-    const goToBack = () => {
-      toolbar.onNavigate('PREV');
-    };
-
-    const goToNext = () => {
-      toolbar.onNavigate('NEXT');
-    };
-
-    const goToCurrent = () => {
-      toolbar.onNavigate('TODAY');
-    };
-
-    const changeView = (viewName) => {
-      toolbar.onView(viewName);
-    };
-
     return (
       <div className="rbc-toolbar flex flex-col sm:flex-row items-center justify-between mb-4 gap-3">
         <div className="flex items-center gap-2">
@@ -137,21 +152,21 @@ export default function UserCalendar({ userId }) {
         
         <div className="flex items-center gap-2">
           <button
-            onClick={goToBack}
+            onClick={() => toolbar.onNavigate('PREV')}
             className="px-3 py-1 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 text-sm"
           >
             ‹
           </button>
           
           <button
-            onClick={goToCurrent}
+            onClick={() => toolbar.onNavigate('TODAY')}
             className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
           >
             Today
           </button>
           
           <button
-            onClick={goToNext}
+            onClick={() => toolbar.onNavigate('NEXT')}
             className="px-3 py-1 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 text-sm"
           >
             ›
@@ -162,7 +177,7 @@ export default function UserCalendar({ userId }) {
           {['month', 'week', 'day'].map((viewName) => (
             <button
               key={viewName}
-              onClick={() => changeView(viewName)}
+              onClick={() => toolbar.onView(viewName)}
               className={`px-3 py-1 rounded text-sm transition-colors ${
                 toolbar.view === viewName
                   ? 'bg-white text-blue-600 shadow-sm font-medium'
@@ -177,50 +192,31 @@ export default function UserCalendar({ userId }) {
     );
   };
 
-  // Custom event component to handle single day display
-  const CustomEvent = ({ event }) => {
-    return (
-      <div className="rbc-event-content">
-        <div className="text-xs font-medium">
-          {event.resource.type}
-        </div>
-        <div className="text-[10px] opacity-75">
-          {event.resource.status}
-          {event.resource.isSingleDay && ` • ${event.resource.days} day`}
-          {!event.resource.isSingleDay && ` • ${event.resource.days} days`}
-        </div>
-      </div>
-    );
-  };
+  // Count non-paid leaves for summary (INCLUDE PENDING LEAVES)
+  const nonPaidLeaves = events.filter(e => e.resource.isNonPaid).length;
+  const nonPaidDays = events
+    .filter(e => e.resource.isNonPaid)
+    .reduce((total, e) => total + (e.resource.nonPaidDays || e.resource.days), 0);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96 bg-white rounded-lg border border-gray-200">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-3 text-gray-600">Loading calendar...</p>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-        <div className="flex items-center mb-3">
-          <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <h3 className="text-sm font-medium text-red-800">Error loading calendar</h3>
-        </div>
-        <p className="text-sm text-red-600">{error}</p>
+      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        Error loading calendar: {error}
       </div>
     );
   }
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-      {/* Header with title and legend */}
+      {/* Header with title and legend - UPDATED to include non-paid */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <h3 className="text-lg font-semibold text-gray-900 flex items-center">
           <svg className="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -229,19 +225,23 @@ export default function UserCalendar({ userId }) {
           Leave Calendar
         </h3>
         
-        {/* Status Legend */}
+        {/* Status Legend - UPDATED to include non-paid */}
         <div className="flex flex-wrap gap-4">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-green-100 border-2 border-green-300 rounded"></div>
-            <span className="text-xs text-gray-600">Approved</span>
+            <span className="text-xs text-gray-600">Approved (Paid)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-yellow-100 border-2 border-yellow-300 rounded"></div>
-            <span className="text-xs text-gray-600">Pending</span>
+            <span className="text-xs text-gray-600">Pending (Paid)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-red-100 border-2 border-red-300 rounded"></div>
-            <span className="text-xs text-gray-600">Rejected</span>
+            <span className="text-xs text-gray-600">Rejected (Paid)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-600 border-2 border-red-800 rounded"></div>
+            <span className="text-xs text-gray-600">Non-Paid (All Statuses)</span>
           </div>
         </div>
       </div>
@@ -282,11 +282,11 @@ export default function UserCalendar({ userId }) {
         />
       </div>
 
-      {/* Leave Summary */}
+      {/* Leave Summary - UPDATED to include non-paid statistics from ALL statuses */}
       {events.length > 0 && (
         <div className="mt-6 p-4 bg-gray-50 rounded-lg">
           <h4 className="text-sm font-medium text-gray-900 mb-3">Leave Summary</h4>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 text-xs">
             <div className="text-center p-2 bg-blue-50 rounded">
               <div className="text-blue-800 font-semibold text-sm">
                 {events.length}
@@ -295,23 +295,68 @@ export default function UserCalendar({ userId }) {
             </div>
             <div className="text-center p-2 bg-green-50 rounded">
               <div className="text-green-800 font-semibold text-sm">
-                {events.filter(e => e.resource.status === 'approved').length}
+                {events.filter(e => e.resource.status === 'approved' && !e.resource.isNonPaid).length}
               </div>
-              <div className="text-green-600">Approved</div>
+              <div className="text-green-600">Approved (Paid)</div>
             </div>
             <div className="text-center p-2 bg-yellow-50 rounded">
               <div className="text-yellow-800 font-semibold text-sm">
-                {events.filter(e => e.resource.status === 'pending').length}
+                {events.filter(e => e.resource.status === 'pending' && !e.resource.isNonPaid).length}
               </div>
-              <div className="text-yellow-600">Pending</div>
+              <div className="text-yellow-600">Pending (Paid)</div>
             </div>
             <div className="text-center p-2 bg-red-50 rounded">
               <div className="text-red-800 font-semibold text-sm">
-                {events.filter(e => e.resource.status === 'rejected').length}
+                {events.filter(e => e.resource.status === 'rejected' && !e.resource.isNonPaid).length}
               </div>
-              <div className="text-red-600">Rejected</div>
+              <div className="text-red-600">Rejected (Paid)</div>
+            </div>
+            <div className="text-center p-2 bg-red-100 rounded">
+              <div className="text-red-900 font-semibold text-sm">
+                {nonPaidLeaves}
+              </div>
+              <div className="text-red-700">Non-Paid Leaves</div>
+            </div>
+            <div className="text-center p-2 bg-red-200 rounded">
+              <div className="text-red-900 font-semibold text-sm">
+                {nonPaidDays}
+              </div>
+              <div className="text-red-700">Non-Paid Days</div>
             </div>
           </div>
+          
+          {/* Detailed breakdown of non-paid leaves */}
+          {nonPaidLeaves > 0 && (
+            <div className="mt-4 pt-3 border-t border-gray-200">
+              <h5 className="text-xs font-medium text-gray-700 mb-2">Non-Paid Leaves Breakdown</h5>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                <div className="text-center p-2 bg-red-50 rounded">
+                  <div className="text-red-800 font-semibold">
+                    {events.filter(e => e.resource.isNonPaid && e.resource.status === 'approved').length}
+                  </div>
+                  <div className="text-red-600">Approved</div>
+                </div>
+                <div className="text-center p-2 bg-red-75 rounded">
+                  <div className="text-red-800 font-semibold">
+                    {events.filter(e => e.resource.isNonPaid && e.resource.status === 'pending').length}
+                  </div>
+                  <div className="text-red-600">Pending</div>
+                </div>
+                <div className="text-center p-2 bg-red-100 rounded">
+                  <div className="text-red-800 font-semibold">
+                    {events.filter(e => e.resource.isNonPaid && e.resource.status === 'rejected').length}
+                  </div>
+                  <div className="text-red-600">Rejected</div>
+                </div>
+                <div className="text-center p-2 bg-red-150 rounded">
+                  <div className="text-red-800 font-semibold">
+                    {nonPaidDays}
+                  </div>
+                  <div className="text-red-600">Total Non-Paid Days</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

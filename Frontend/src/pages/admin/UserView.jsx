@@ -38,6 +38,15 @@ export default function UserView() {
     return new Date(dateString).toLocaleDateString();
   };
 
+  // Calculate non-paid leave statistics
+  const nonPaidStats = userDetails?.leaves?.reduce((acc, leave) => {
+    if (leave.is_non_paid && leave.status === 'approved') {
+      acc.total += 1;
+      acc.days += leave.non_paid_days || 0;
+    }
+    return acc;
+  }, { total: 0, days: 0 }) || { total: 0, days: 0 };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -145,6 +154,15 @@ export default function UserView() {
               <span className="font-medium">Total Leave Days:</span>
               <span>{leave_stats?.total_days || 0} days</span>
             </div>
+            {/* Non-paid leave statistics */}
+            <div className="flex justify-between border-t pt-2 mt-2">
+              <span className="font-medium text-red-700">Non-Paid Leaves:</span>
+              <span className="text-red-700">{nonPaidStats.total || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-medium text-red-700">Non-Paid Days:</span>
+              <span className="text-red-700">{nonPaidStats.days || 0} days</span>
+            </div>
           </div>
         </div>
 
@@ -166,6 +184,7 @@ export default function UserView() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dates</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Non-Paid</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requested</th>
                   </tr>
                 </thead>
@@ -189,6 +208,15 @@ export default function UserView() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                         {leave.total_days}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {leave.is_non_paid ? (
+                          <span className="text-red-600 font-medium">
+                            {leave.non_paid_days || leave.total_days} days
+                          </span>
+                        ) : (
+                          <span className="text-green-600">0 days</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                         {formatDate(leave.created_at)}

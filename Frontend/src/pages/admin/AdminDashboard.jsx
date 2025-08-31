@@ -29,7 +29,7 @@ export default function AdminDashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      
+
       // Fetch all data in parallel
       const [employeesRes, leavesRes] = await Promise.all([
         fetch('/api/users/all', {
@@ -69,12 +69,12 @@ export default function AdminDashboard() {
       const calendarEvents = leaves.map(leave => {
         const startDate = new Date(leave.start_date);
         const endDate = new Date(leave.end_date);
-        
+
         // For single day leaves, end date should be the same as start date
         // For multi-day leaves, end date should be inclusive
         const isSingleDay = startDate.toDateString() === endDate.toDateString();
         const calendarEndDate = isSingleDay ? startDate : endDate;
-        
+
         return {
           id: leave.id,
           title: `${leave.employee_name} - ${leave.leave_type}`,
@@ -106,22 +106,29 @@ export default function AdminDashboard() {
     let borderColor = '#d1d5db';
     let textColor = '#374151';
 
-    switch (event.resource.status) {
-      case 'approved':
-        backgroundColor = '#dcfce7';
-        borderColor = '#86efac';
-        textColor = '#166534';
-        break;
-      case 'pending':
-        backgroundColor = '#fef3c7';
-        borderColor = '#fcd34d';
-        textColor = '#92400e';
-        break;
-      case 'rejected':
-        backgroundColor = '#fee2e2';
-        borderColor = '#fca5a5';
-        textColor = '#991b1b';
-        break;
+    if (event.resource?.is_non_paid) {
+      // Dark red for non-paid leaves
+      backgroundColor = '#dc2626';
+      borderColor = '#b91c1c';
+      textColor = '#ffffff';
+    } else {
+      switch (event.resource.status) {
+        case 'approved':
+          backgroundColor = '#dcfce7';
+          borderColor = '#86efac';
+          textColor = '#166534';
+          break;
+        case 'pending':
+          backgroundColor = '#fef3c7';
+          borderColor = '#fcd34d';
+          textColor = '#92400e';
+          break;
+        case 'rejected':
+          backgroundColor = '#fee2e2';
+          borderColor = '#fca5a5';
+          textColor = '#991b1b';
+          break;
+      }
     }
 
     return {
@@ -137,6 +144,7 @@ export default function AdminDashboard() {
     };
   };
 
+
   // Custom event component to handle single day display
   const CustomEvent = ({ event }) => {
     return (
@@ -146,6 +154,7 @@ export default function AdminDashboard() {
         </div>
         <div className="text-[10px] opacity-75">
           {event.resource.type} • {event.resource.status}
+          {event.resource.is_non_paid && ' • Non-Paid'}
         </div>
       </div>
     );
@@ -159,7 +168,7 @@ export default function AdminDashboard() {
             {moment(toolbar.date).format('MMMM YYYY')}
           </span>
         </div>
-        
+
         <div className="flex items-center gap-2">
           <button
             onClick={() => toolbar.onNavigate('PREV')}
@@ -167,14 +176,14 @@ export default function AdminDashboard() {
           >
             ‹
           </button>
-          
+
           <button
             onClick={() => toolbar.onNavigate('TODAY')}
             className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
           >
             Today
           </button>
-          
+
           <button
             onClick={() => toolbar.onNavigate('NEXT')}
             className="px-3 py-1 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 text-sm"
@@ -182,17 +191,16 @@ export default function AdminDashboard() {
             ›
           </button>
         </div>
-        
+
         <div className="flex items-center gap-1 bg-gray-100 rounded-md p-1">
           {['month', 'week', 'day'].map((viewName) => (
             <button
               key={viewName}
               onClick={() => toolbar.onView(viewName)}
-              className={`px-3 py-1 rounded text-sm transition-colors ${
-                toolbar.view === viewName
+              className={`px-3 py-1 rounded text-sm transition-colors ${toolbar.view === viewName
                   ? 'bg-white text-blue-600 shadow-sm font-medium'
                   : 'text-gray-600 hover:text-gray-900'
-              }`}
+                }`}
             >
               {viewName.charAt(0).toUpperCase() + viewName.slice(1)}
             </button>
@@ -295,7 +303,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        
+
 
         {/* Calendar Section */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
