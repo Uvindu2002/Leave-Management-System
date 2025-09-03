@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import bcrypt from 'bcryptjs';
 import { useParams, useNavigate } from "react-router-dom";
 import { useRole } from "../../contexts/RoleContext";
 
@@ -6,6 +7,10 @@ export default function UserEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [leaveEntitlements, setLeaveEntitlements] = useState({
+    annual: 0,
+    casual: 0
+  });
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -46,6 +51,10 @@ export default function UserEdit() {
         const managersData = await managersRes.json();
 
         setUser(userData.user);
+        setLeaveEntitlements({
+          annual: userData.leave_entitlements?.annual_leave_remaining || 0,
+          casual: userData.leave_entitlements?.casual_leave_remaining || 0
+        });
         setFormData({
           name: userData.user.name,
           email: userData.user.email,
@@ -53,8 +62,8 @@ export default function UserEdit() {
           role: userData.user.role,
           employment_type: userData.user.employment_type || "confirmed",
           manager_id: userData.user.manager_id || "",
-          remaining_annual: userData.user.remaining_annual || 0,
-          remaining_casual: userData.user.remaining_casual || 0
+          remaining_annual: userData.leave_entitlements?.annual_leave_remaining || 0,
+          remaining_casual: userData.leave_entitlements?.casual_leave_remaining || 0
         });
         setManagers(managersData);
       } catch (err) {
@@ -74,7 +83,6 @@ export default function UserEdit() {
     }));
   };
 
-
   // Handler for admin auth input
   const handleAdminAuthChange = (e) => {
     setAdminAuth(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -89,9 +97,10 @@ export default function UserEdit() {
 
     // If leave counts are changed, require admin auth
     if (
-      user && (
-        Number(formData.remaining_annual) !== Number(user.remaining_annual || 0) ||
-        Number(formData.remaining_casual) !== Number(user.remaining_casual || 0)
+      user &&
+      (
+        Number(formData.remaining_annual) !== Number(leaveEntitlements.annual || 0) ||
+        Number(formData.remaining_casual) !== Number(leaveEntitlements.casual || 0)
       )
     ) {
       setShowAdminAuth(true);
@@ -101,16 +110,48 @@ export default function UserEdit() {
   };
 
   // Actual update logic
-  const updateUser = async (adminCreds) => {
+  const updateUser = async (adminCreds = null) => {
     setSaving(true);
     setError("");
     setAdminError("");
+    
     try {
       let body = { ...formData };
+      
+      // If admin credentials are required (for leave count changes)
       if (adminCreds) {
-        body.admin_username = adminCreds.username;
-        body.admin_password = adminCreds.password;
+        const storedUser = JSON.parse(localStorage.getItem('user'));
+        const storedHashedPassword = localStorage.getItem("password");
+
+        if (!storedUser || !storedHashedPassword) {
+          setAdminError("Admin credentials not found in local storage");
+          setSaving(false);
+          return; // Don't close modal, show error
+        }
+
+        // Compare the plain text password with the stored hash
+        const isPasswordValid = await bcrypt.compare(adminCreds.password, storedHashedPassword);
+        const isEmailValid = storedUser.email === adminCreds.username;
+
+        if (!isEmailValid && !isPasswordValid) {
+          setAdminError("Admin credentials are not correct. Please try again.");
+          setAdminAuth({ username: "", password: "" }); // Clear the entered credentials
+          setSaving(false);
+          return;
+        } else if (!isEmailValid) {
+          setAdminError("Admin email is incorrect. Please try again.");
+          setAdminAuth(prev => ({ ...prev, username: "" })); // Clear only email
+          setSaving(false);
+          return;
+        } else if (!isPasswordValid) {
+          setAdminError("Admin password is incorrect. Please try again.");
+          setAdminAuth(prev => ({ ...prev, password: "" })); // Clear only password
+          setSaving(false);
+          return;
+        }
       }
+
+      // Proceed with the update request
       const res = await fetch(`/api/users/${id}`, {
         method: "PUT",
         headers: {
@@ -119,29 +160,47 @@ export default function UserEdit() {
         },
         body: JSON.stringify(body)
       });
+      
       if (res.ok) {
         setSuccess("User updated successfully");
         setTimeout(() => navigate('/admin/users'), 2000);
+        setShowAdminAuth(false); // Close modal on success
       } else {
         const data = await res.json();
         if (data.adminAuth === false) {
-          setAdminError("Invalid admin credentials");
+          setAdminError("Invalid admin credentials. Please try again.");
+          setAdminAuth({ username: "", password: "" }); // Clear credentials
         } else {
           setError(data.message || 'Failed to update user');
+          setShowAdminAuth(false); // Close modal on other errors
         }
       }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'An error occurred');
+      setShowAdminAuth(false); // Close modal on error
     } finally {
       setSaving(false);
-      setShowAdminAuth(false);
     }
   };
 
   // Handler for admin auth submit
   const handleAdminAuthSubmit = async (e) => {
     e.preventDefault();
+    setAdminError("");
+    
+    if (!adminAuth.username || !adminAuth.password) {
+      setAdminError("Please enter both username and password");
+      return;
+    }
+    
     await updateUser(adminAuth);
+  };
+
+  // Close admin auth modal and reset
+  const closeAdminAuthModal = () => {
+    setShowAdminAuth(false);
+    setAdminAuth({ username: "", password: "" });
+    setAdminError("");
   };
 
   if (loading) {
@@ -194,7 +253,6 @@ export default function UserEdit() {
       {/* Edit Form */}
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* ...existing code... */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
             <input
@@ -319,9 +377,13 @@ export default function UserEdit() {
           <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">Admin Authentication Required</h2>
             <p className="mb-4 text-gray-600">To update leave counts, please enter admin username and password.</p>
+            
             {adminError && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded mb-4">{adminError}</div>
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                <strong>Authentication Failed:</strong> {adminError}
+              </div>
             )}
+            
             <form onSubmit={handleAdminAuthSubmit}>
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Admin Username</label>
@@ -332,6 +394,7 @@ export default function UserEdit() {
                   onChange={handleAdminAuthChange}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
+                  placeholder="Enter admin email"
                 />
               </div>
               <div className="mb-6">
@@ -343,12 +406,13 @@ export default function UserEdit() {
                   onChange={handleAdminAuthChange}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
+                  placeholder="Enter admin password"
                 />
               </div>
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => { setShowAdminAuth(false); setAdminAuth({ username: "", password: "" }); }}
+                  onClick={closeAdminAuthModal}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500"
                 >
                   Cancel
@@ -358,7 +422,7 @@ export default function UserEdit() {
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={saving}
                 >
-                  {saving ? 'Saving...' : 'Confirm'}
+                  {saving ? 'Verifying...' : 'Verify Credentials'}
                 </button>
               </div>
             </form>

@@ -99,6 +99,7 @@ export const getMe = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      password: user.password_hash,
       manager_id: user.manager_id,
       employment_type: user.employment_type,
       confirmation_date: user.confirmation_date,
@@ -185,7 +186,7 @@ export const getUserDetails = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, role, employment_type, manager_id } = req.body;
+    const { name, email, role, employment_type, manager_id, remaining_annual, remaining_casual } = req.body;
 
     // Check if email already exists (excluding current user)
     const [existingEmail] = await sql`
@@ -207,6 +208,13 @@ export const updateUser = async (req, res) => {
       await sql`
         UPDATE employee_details 
         SET employment_type = ${employment_type}
+        WHERE user_id = ${id}
+      `;
+    }
+    if (remaining_annual || remaining_casual) {
+      await sql`
+        UPDATE leave_entitlements 
+        SET annual_leave_remaining = ${remaining_annual}, casual_leave_remaining = ${remaining_casual}
         WHERE user_id = ${id}
       `;
     }

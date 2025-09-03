@@ -8,6 +8,7 @@ export function RoleProvider({ children }) {
   const [activeRole, setActiveRole] = useState(null);
   const [originalRole, setOriginalRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [password, setPassword] = useState(null);
 
   // Load user + token from localStorage and validate with backend
   const loadUserRoles = async () => {
@@ -17,12 +18,14 @@ export function RoleProvider({ children }) {
     const storedToken = localStorage.getItem("token");
     const storedActiveRole = localStorage.getItem("activeRole");
     const storedOriginalRole = localStorage.getItem("originalRole"); // 🆕 Store original role separately
+    const storedPassword = localStorage.getItem("password");
 
     console.log('Loading user roles from storage:', {
       hasStoredUser: !!storedUser,
       hasStoredToken: !!storedToken,
       storedActiveRole,
-      storedOriginalRole
+      storedOriginalRole,
+      storedPassword
     });
 
     if (storedUser && storedToken) {
@@ -57,11 +60,13 @@ export function RoleProvider({ children }) {
         setToken(storedToken);
         setOriginalRole(newOriginalRole);
         setActiveRole(newActiveRole);
+        setPassword(storedPassword);
 
         // 🆕 Update localStorage with both roles
         localStorage.setItem("user", JSON.stringify(data));
         localStorage.setItem("activeRole", newActiveRole);
         localStorage.setItem("originalRole", newOriginalRole); // 🆕 Store original role
+        localStorage.setItem("password", password);
 
       } catch (err) {
         console.log("Token validation failed, logging out", err);
@@ -101,11 +106,13 @@ export function RoleProvider({ children }) {
     localStorage.setItem("token", newToken);
     localStorage.setItem("activeRole", userActiveRole);
     localStorage.setItem("originalRole", userOriginalRole); // 🆕 Store original role
+    localStorage.setItem("password", newUser.password); // 🆕 Store password
 
     setUser(newUser);
     setToken(newToken);
     setOriginalRole(userOriginalRole);
     setActiveRole(userActiveRole);
+    setPassword(newUser.password);
   };
 
   // Logout: clear everything
@@ -116,6 +123,7 @@ export function RoleProvider({ children }) {
     localStorage.removeItem("token");
     localStorage.removeItem("activeRole");
     localStorage.removeItem("originalRole"); // 🆕 Remove original role
+    localStorage.removeItem("password"); // 🆕 Remove password
     resetRoles();
   };
 

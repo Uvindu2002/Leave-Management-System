@@ -146,6 +146,7 @@ export const loginUser = async (email, password) => {
       name: user.name, 
       email: user.email, 
       role: user.role,
+      password: user.password_hash,
       manager_id: user.manager_id,
       employment_type: user.employment_type,
       confirmation_date: user.confirmation_date,
