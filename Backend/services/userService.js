@@ -78,14 +78,29 @@ const initializeLeaveEntitlements = async (sql, userId, year, employmentType, co
   } else if (employmentType === 'probation' || employmentType === 'internship') {
     // Probation/Internship: 1 day casual leave per completed month since confirmation/probation start
     if (confirmationDate) {
-      const start = new Date(confirmationDate);
-      const now = new Date();
-      let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-      if (now.getDate() >= start.getDate()) months += 1; // count current month if day passed
-      casualEntitlement = Math.max(0, months);
-    } else {
-      casualEntitlement = 0;
-    }
+  const start = new Date(confirmationDate);
+  const now = new Date();
+
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    (now.getMonth() - start.getMonth());
+
+  // ❗Subtract a month if we haven't reached the day yet this month
+  if ((now < start) && months > 0) {
+    months -= 1;
+  }
+  if (months < 0) months = 0; // Ensure non-negative
+  if (months > 12) months = 12; // Cap at 12 months
+  if (months > 0) {
+    // Subtract the first month (since it's not counted)
+    months -= 1;
+  }
+
+  casualEntitlement = Math.max(0, months);
+} else {
+  casualEntitlement = 0;
+}
+
     
   }
 
