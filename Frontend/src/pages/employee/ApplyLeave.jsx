@@ -29,6 +29,7 @@ export default function ApplyLeave() {
     const [message, setMessage] = useState("");
     const [leaveBalance, setLeaveBalance] = useState(null);
     const { user, token } = useRole();
+    const [pastCasualLeaves, setPastCasualLeaves] = useState(0);
 
     // Fetch leave balance
     useEffect(() => {
@@ -44,6 +45,8 @@ export default function ApplyLeave() {
                 if (res.ok) {
                     const data = await res.json();
                     setLeaveBalance(data);
+                    setPastCasualLeaves(data.casual_leaves_history || 0);
+                    console.log(pastCasualLeaves);
                 } else {
                     console.warn("Failed to fetch leave balance:", res.status);
                     // Don't show error to user - it's not critical for form submission

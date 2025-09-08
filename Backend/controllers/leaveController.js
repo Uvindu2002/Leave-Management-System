@@ -46,32 +46,17 @@ const checkProbationLeaveEligibility = async (userId, leaveType, totalDays, curr
     WHERE ed.user_id = ${userId}
   `;
 
-  const employmentType = userDetails?.employment_type;
+
   const availablePaidLeaves = Number(userDetails?.casual_leave_remaining || 0);
   const paidDays = Math.min(Number(totalDays), availablePaidLeaves);
   const nonPaidDays = Math.max(0, Number(totalDays) - paidDays);
 
-  // Enforce up to 1 non-paid day per month (count what's already used this month)
-  const usedNonPaidThisMonth = await getUsedNonPaidDaysThisMonth(userId);
-  const monthlyLimit = 1;
-  const allowedNonPaidLeft = Math.max(0, monthlyLimit - usedNonPaidThisMonth);
-
-  // For confirmed and probation/internship, allow split but enforce limit
-  if (employmentType === 'confirmed' || employmentType === 'probation' || employmentType === 'internship') {
-    return {
-      eligible: nonPaidDays <= allowedNonPaidLeft,
-      paidDays,
-      nonPaidDays,
-      allowedNonPaidLeft
-    };
-  }
-
-  // Default case (unknown employment): behave like confirmed
+  // No monthly non-paid day limit
   return {
-    eligible: nonPaidDays <= allowedNonPaidLeft,
+    eligible: true,
     paidDays,
     nonPaidDays,
-    allowedNonPaidLeft
+    allowedNonPaidLeft: null
   };
 };
 
@@ -247,6 +232,26 @@ export const getLeaveBalance = async (req, res) => {
       LEFT JOIN employee_details ed ON le.user_id = ed.user_id
       WHERE le.user_id = ${req.user.userId} AND le.year = ${currentYear}
     `;
+
+    const casualLeavesHistoryRow = await sql`
+      SELECT *
+      FROM leaves
+      WHERE user_id = ${req.user.userId}
+        AND leave_type = 'casual'
+    `;
+    if (casualLeavesHistoryRow) {
+      balance = {
+        ...balance,
+        casual_leaves_history: casualLeavesHistoryRow
+      };
+    } else {
+      balance = {
+        ...balance,
+        casual_leaves_history: ''
+      };
+    }
+
+
 
     // If no balance found, create default entitlements
     if (!balance) {

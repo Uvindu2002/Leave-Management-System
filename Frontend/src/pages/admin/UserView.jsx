@@ -39,13 +39,16 @@ export default function UserView() {
   };
 
   // Calculate non-paid leave statistics
-  const nonPaidStats = userDetails?.leaves?.reduce((acc, leave) => {
+  console.log(userDetails);
+  const nonPaidStats = userDetails?.recent_leaves?.reduce((acc, leave) => {
     if (leave.is_non_paid && leave.status === 'approved') {
-      acc.total += 1;
-      acc.days += leave.non_paid_days || 0;
+      console.log(leave);
+      acc.nonPaid += Number(leave.non_paid_days) || 0;
+    }else if (!leave.is_non_paid && leave.status === 'approved') {
+      acc.Paid += Number(leave.total_days) || 0;
     }
     return acc;
-  }, { total: 0, days: 0 }) || { total: 0, days: 0 };
+  }, {  nonPaid: 0, Paid: 0 }) || {  nonPaid: 0, Paid: 0 };
 
   if (loading) {
     return (
@@ -156,12 +159,12 @@ export default function UserView() {
             </div>
             {/* Non-paid leave statistics */}
             <div className="flex justify-between border-t pt-2 mt-2">
-              <span className="font-medium text-red-700">Non-Paid Leaves:</span>
-              <span className="text-red-700">{nonPaidStats.total || 0}</span>
+              <span className="font-medium text-red-700">Paid Leaves:</span>
+              <span className="text-red-700">{nonPaidStats.Paid || 0}</span>
             </div>
             <div className="flex justify-between">
-              <span className="font-medium text-red-700">Non-Paid Days:</span>
-              <span className="text-red-700">{nonPaidStats.days || 0} days</span>
+              <span className="font-medium text-red-700">Non-Paid Leaves:</span>
+              <span className="text-red-700">{nonPaidStats.nonPaid || 0} days</span>
             </div>
           </div>
         </div>
